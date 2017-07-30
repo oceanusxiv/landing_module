@@ -1,0 +1,10 @@
+<launch>
+    <arg name="output" default="screen"/>
+
+    <node pkg="landing_module" name="landing_module_node" type="landing_module_node" output="$(arg output)">
+        <remap from="landing_module_node/imu" to="/mavros/imu/data"/>
+        <remap from="landing_module_node/image" to="/camera1/image_raw"/>
+        <remap from="landing_module_node/pose" to="/mavros/local_position/pose"/>
+    </node>
+
+</launch>
