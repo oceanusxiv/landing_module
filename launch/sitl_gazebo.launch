@@ -1,16 +1,16 @@
 <launch>
 	<include file="$(find px4)/launch/mavros_posix_sitl.launch">
-		<!-- <arg name="vehicle" value="typhoon_h480"/> -->
-		<arg name="vehicle" value="uav_challenge"/>
+		 <!-- <arg name="vehicle" value="typhoon_h480"/>  -->
+		 <arg name="vehicle" value="uav_challenge"/> 
 		 <arg name="world" value="$(find mavlink_sitl_gazebo)/worlds/uav_challenge.world"/> 
 		<arg name="est" value="ekf2"/>
-		 <arg name="rcS" value="$(find landing_module)/launch/uav_challenge"/>    
+		  <arg name="rcS" value="$(find landing_module)/launch/uav_challenge"/>     
 	</include>
 
-    <!-- <node pkg="landing_module" name="landing_module_node" type="landing_module_node" output="screen">
+     <node pkg="landing_module" name="landing_module_node" type="landing_module_node" output="screen">
         <remap from="landing_module_node/image" to="/cgo3_camera/image_raw"/>
         <remap from="landing_module_node/pose" to="/mavros/local_position/pose"/>
-    </node>    -->
+    </node>    
 
 	<!--<node name="teraranger_altitude_broadcast" pkg="hallway_navigator" type="range_to_altitude_broadcaster" output="screen" />-->
 

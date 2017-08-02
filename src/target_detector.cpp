@@ -9,12 +9,17 @@ void target_detector::initialize_callbacks() {
     image_sub_ = it_.subscribe("image", 1, &target_detector::topics_callback, this);
     image_pub_ = it_.advertise("/out", 1);
     state_sub_ = nh_.subscribe("mavros/state", 10, &target_detector::state_callback, this);
+    pos_sub_ = nh_.subscribe("mavros/local_position/pose", 10, &target_detector::pose_callback, this);
     pos_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("mavros/setpoint_position/local", 10);
     vel_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("mavros/setpoint_velocity/cmd_vel", 10);
 }
 
 void target_detector::state_callback(const mavros_msgs::StateConstPtr &stateMsg) {
     current_state = *stateMsg;
+}
+
+void target_detector::pose_callback(const geometry_msgs::PoseStampedConstPtr &poseMsg) {
+    current_pose = *poseMsg;
 }
 
 void target_detector::initialize_uav() {
@@ -72,12 +77,15 @@ void target_detector::initialize_uav() {
 
 void target_detector::search_controller() {
 
-    geometry_msgs::PoseStamped pose;
-    pose.pose.position.x = 0;
-    pose.pose.position.y = 0;
-    pose.pose.position.z = 1;
+    geometry_msgs::TwistStamped twist;
 
-    pos_pub_.publish(pose);
+    twist.twist.linear.x = 0;
+    twist.twist.linear.y = 0;
+    twist.twist.linear.z = 0;
+
+    twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
+
+    vel_pub_.publish(twist);
 }
 
 bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display, cv::Point2f& result) {

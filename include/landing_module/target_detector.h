@@ -83,12 +83,14 @@ private:
     ros::NodeHandle nh_;
     ros::Time last_command;
     mavros_msgs::State current_state;
+    geometry_msgs::PoseStamped current_pose;
     image_transport::ImageTransport it_;
 //    message_filters::Subscriber<geometry_msgs::PoseStamped> pose_sub_;
 //    image_transport::SubscriberFilter image_sub_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
     ros::Subscriber state_sub_;
+    ros::Subscriber pos_sub_;
     ros::Publisher pos_pub_;
     ros::Publisher vel_pub_;
     ros::ServiceClient gimbal_command_client;
@@ -119,11 +121,14 @@ private:
     static const int MAV_CMD_DO_MOUNT_CONFIGURE = 204;
     const int fontFace = CV_FONT_NORMAL;
     double h_fov = 90;
+    double search_altitude = 3;
 
     void topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
                          const sensor_msgs::ImageConstPtr& imageMsg);
 
     void state_callback(const mavros_msgs::StateConstPtr& stateMsg);
+
+    void pose_callback(const geometry_msgs::PoseStampedConstPtr& poseMsg);
 
     bool detect_target(const cv::Mat &input, const cv::Mat& display, cv::Point2f& result);
 
