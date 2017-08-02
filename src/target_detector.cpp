@@ -53,7 +53,7 @@ void target_detector::initialize_uav() {
         if( current_state.mode != "OFFBOARD" &&
             (ros::Time::now() - last_command > ros::Duration(5.0))){
             if( set_mode_client.call(set_mode_msg) &&
-                set_mode_msg.response.mode_sent) {
+                set_mode_msg.response.success) {
                 ROS_INFO("Offboard enabled");
             }
             last_command = ros::Time::now();
@@ -77,15 +77,25 @@ void target_detector::initialize_uav() {
 
 void target_detector::search_controller() {
 
-    geometry_msgs::TwistStamped twist;
+//    geometry_msgs::TwistStamped twist;
+//
+//    twist.twist.linear.x = 0;
+//    twist.twist.linear.y = 0;
+//    twist.twist.linear.z = 0;
+//
+//    twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
+//
+//    vel_pub_.publish(twist);
 
-    twist.twist.linear.x = 0;
-    twist.twist.linear.y = 0;
-    twist.twist.linear.z = 0;
+    geometry_msgs::PoseStamped pose;
 
-    twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
+    pose.pose.position.x = search_position_x;
+    pose.pose.position.y = search_position_y;
+    pose.pose.position.z = search_altitude;
+    pose.pose.orientation = toQuaternion(0, 0, search_yaw);
 
-    vel_pub_.publish(twist);
+    pos_pub_.publish(pose);
+
 }
 
 bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display, cv::Point2f& result) {
@@ -104,15 +114,36 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
 
     for (auto& corner : corners) {
         int transitions = 0;
-        for (int i = 1; i < ring.size(); i++) {
-            if (std::abs(input.at<uchar>(corner + ring[i]) - input.at<uchar>(corner + ring[i - 1])) > threshold)
+        std::vector<double> pixels;
+        for (auto& loc : ring) {
+            pixels.push_back(double(input.at<uchar>(corner + loc)));
+        }
+
+        double sum = std::accumulate(pixels.begin(), pixels.end(), 0.0);
+        double mean = sum / pixels.size();
+        int previous = 0;
+
+        for (int i = 1; i < pixels.size(); i++) {
+            if (pixels[i] > mean && pixels[i - 1] <= mean) {
                 transitions++;
+//                if (previous == 1) break;
+//                if (previous == 0) previous = 1;
+//                if (previous == -1) previous = 1;
+
+            }
+            else if (pixels[i] < mean && pixels[i - 1] >= mean) {
+                transitions++;
+//                if (previous == -1) break;
+//                if (previous == 0) previous = -1;
+//                if (previous == 1) previous = -1;
+
+            }
         }
 
         cv::circle(display, corner, 3, cv::Scalar(255, 0, 0), -1, 8, 0);
         std::ostringstream text;
         text << transitions;
-        cv::putText(display, text.str(), corner, fontFace, 0.5, cv::Scalar(0, 0, 0));
+        cv::putText(display, text.str(), corner, fontFace, 0.5, cv::Scalar(255, 0, 0));
 
         if (transitions == 4) {
             result.x = corner.x;
@@ -133,7 +164,7 @@ void target_detector::track_target(cv::Point target_location, const cv::Mat &ima
     gimbal_state.add_yaw(yaw_correction);
     gimbal_state.add_pitch(pitch_correction);
 
-    std::cout << gimbal_state.yaw << ", " << gimbal_state.pitch << std::endl;
+//    std::cout << gimbal_state.yaw << ", " << gimbal_state.pitch << std::endl;
 
     mavros_msgs::CommandLong gimbal_command;
 
@@ -163,30 +194,45 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
     cv_bridge::CvImageConstPtr src_gray_ptr;
     cv_bridge::CvImagePtr src_ptr;
 
-    try {
-        src_gray_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::MONO8);
-        src_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::BGR8);
-    } catch (cv_bridge::Exception &e) {
-        throw std::runtime_error(
-                std::string("cv_bridge exception: ") + std::string(e.what()));
+    if (current_state.armed) {
+        try {
+            src_gray_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::MONO8);
+            src_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::BGR8);
+        } catch (cv_bridge::Exception &e) {
+            throw std::runtime_error(
+                    std::string("cv_bridge exception: ") + std::string(e.what()));
 
-    }
+        }
 
-    cv::Mat dst = src_gray_ptr->image.clone();
-    cv::Point2f target_location;
+        cv::Point2f target_location;
 
-    bool success = detect_target(src_gray_ptr->image, src_ptr->image, target_location);
+        bool success = detect_target(src_gray_ptr->image, src_ptr->image, target_location);
 
-//    if (success) cv::circle(src_ptr->image, target_location, 5, cv::Scalar(255, 0, 0), -1, 8, 0);
-//    cv::Mat src_display;
-//    cv::resize(src_ptr->image, src_display, cv::Size(960, 540));
-//    cv::imshow("Window", src_display);
-//    cv::waitKey(3);
+//    if (success) {
+//        cv::Mat success_patch = src_gray_ptr->image(cv::Rect(int(target_location.x - 2), int(target_location.y - 2), 4, 4));
 //
-    // Output modified video stream
-    image_pub_.publish(src_ptr->toImageMsg());
+//        cv::Mat dst_x, dst_y, dst, abs_dst_x, abs_dst_y, patch_enlarged;
+//
+//        cv::resize(success_patch, patch_enlarged, cv::Size(32, 32), 0, 0, cv::INTER_NEAREST);
+//        cv::GaussianBlur(patch_enlarged, patch_enlarged, cv::Size(3, 3), 0, 0);
+//        cv::Scharr(patch_enlarged, dst_x, CV_32F, 1, 0);
+//        cv::Scharr(patch_enlarged, dst_y, CV_32F, 0, 1);
+//        cv::convertScaleAbs(dst_x, abs_dst_x);
+//        cv::convertScaleAbs(dst_y, abs_dst_y);
+//        cv::addWeighted(abs_dst_x, 0.5, abs_dst_y, 0.5, 0, dst);
+////    cv::Mat src_display = src_gray_ptr->image(cv::Rect(600, 350, 100, 100));
+//        cv::imshow("Window", dst);
+//        cv::imshow("Window2", patch_enlarged);
+//        cv::waitKey(3);
+//    }
 
-    if (success) {
-        track_target(target_location, src_ptr->image);
+        // Output modified video stream
+        image_pub_.publish(src_ptr->toImageMsg());
+
+        if (success) {
+            track_target(target_location, src_ptr->image);
+        }
     }
+
+
 }

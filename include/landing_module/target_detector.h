@@ -120,8 +120,8 @@ private:
     static const int MAV_CMD_DO_MOUNT_CONTROL = 205;
     static const int MAV_CMD_DO_MOUNT_CONFIGURE = 204;
     const int fontFace = CV_FONT_NORMAL;
-    double h_fov = 90;
-    double search_altitude = 3;
+    double h_fov;
+    double search_altitude, search_position_x, search_position_y, search_yaw;
 
     void topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
                          const sensor_msgs::ImageConstPtr& imageMsg);
@@ -148,6 +148,11 @@ public:
         arming_client = nh_.serviceClient<mavros_msgs::CommandBool>("mavros/cmd/arming");
         set_mode_client = nh_.serviceClient<mavros_msgs::SetMode>("mavros/set_mode");
         nh_private_.param<double>("h_fov", h_fov, 90);
+        nh_private_.param<double>("search_altitude", search_altitude, 30);
+        nh_private_.param<double>("search_position_x", search_position_x, 0);
+        nh_private_.param<double>("search_position_y", search_position_y, 0);
+        nh_private_.param<double>("search_yaw", search_yaw, 0);
+
         last_command = ros::Time::now();
     }
     ~target_detector() = default;
@@ -157,6 +162,23 @@ public:
     void initialize_callbacks();
 
     void initialize_uav();
+
+    static geometry_msgs::Quaternion toQuaternion(double pitch, double roll, double yaw)
+    {
+        geometry_msgs::Quaternion q;
+        double t0 = std::cos(yaw * 0.5);
+        double t1 = std::sin(yaw * 0.5);
+        double t2 = std::cos(roll * 0.5);
+        double t3 = std::sin(roll * 0.5);
+        double t4 = std::cos(pitch * 0.5);
+        double t5 = std::sin(pitch * 0.5);
+
+        q.w = t0 * t2 * t4 + t1 * t3 * t5;
+        q.x = t0 * t3 * t4 - t1 * t2 * t5;
+        q.y = t0 * t2 * t5 + t1 * t3 * t4;
+        q.z = t1 * t2 * t4 - t0 * t3 * t5;
+        return q;
+    }
 };
 
 
