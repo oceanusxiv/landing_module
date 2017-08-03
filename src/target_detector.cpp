@@ -53,7 +53,7 @@ void target_detector::initialize_uav() {
         if( current_state.mode != "OFFBOARD" &&
             (ros::Time::now() - last_command > ros::Duration(5.0))){
             if( set_mode_client.call(set_mode_msg) &&
-                set_mode_msg.response.success) {
+                set_mode_msg.response.mode_sent) {
                 ROS_INFO("Offboard enabled");
             }
             last_command = ros::Time::now();
@@ -78,28 +78,28 @@ void target_detector::initialize_uav() {
 void target_detector::search_controller() {
 
     geometry_msgs::TwistStamped twist;
+    static double yaw_dir = 45;
 
     twist.twist.linear.x = 0;
     twist.twist.linear.y = 0;
     twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
 
-    if (ros::Time::now() - last_detection > ros::Duration(2)) {
+    if (ros::Time::now() - last_detection > ros::Duration(5)) {
 
         mavros_msgs::CommandLong gimbal_command;
-        static double yaw_dir = 45;
 
-        if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
-        else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
+        if (ros::Time::now() - last_command > ros::Duration(1)) {
 
-        gimbal_state.add_yaw(yaw_dir);
-        gimbal_state.pitch = -60;
+            if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
+            else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
 
-        gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
-        gimbal_command.request.param1 = float(gimbal_state.pitch);
-        gimbal_command.request.param3 = float(gimbal_state.yaw);
-        gimbal_command.request.param7 = MAV_MOUNT_MODE_MAVLINK_TARGETING;
+            gimbal_state.add_yaw(yaw_dir);
+            gimbal_state.pitch = -40;
 
-        if (ros::Time::now() - last_command > ros::Duration(2)) {
+            gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
+            gimbal_command.request.param1 = float(gimbal_state.pitch);
+            gimbal_command.request.param3 = float(gimbal_state.yaw);
+            gimbal_command.request.param7 = MAV_MOUNT_MODE_MAVLINK_TARGETING;
 
             if (gimbal_command_client.call(gimbal_command) && !int(gimbal_command.response.success)) {
                 std::cout << "command failed!" << std::endl;
@@ -131,49 +131,58 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
     int blockSize = 3;
     bool useHarrisDetector = false;
     double k = 0.04;
-    double threshold = 100;
 
     cv::goodFeaturesToTrack(input, corners, maxCorners, qualityLevel, minDistance, cv::Mat(),
                             blockSize, useHarrisDetector, k);
 
     for (auto& corner : corners) {
-        if (corner.x < 2 || corner.y < 2) return false;
+        if (corner.x < 2 || corner.y < 2 || (corner.x > (input.cols - 2)) || (corner.y > (input.rows - 2))) return false;
 
         std::vector<int> transitions;
-        std::vector<double> pixels;
+        std::vector<int> pixels;
         for (auto& loc : ring) {
-            pixels.push_back(double(input.at<uchar>(corner + loc)));
+            pixels.push_back(int(input.at<uchar>(corner + loc)));
         }
 
         double sum = std::accumulate(pixels.begin(), pixels.end(), 0.0);
         double mean = sum / pixels.size();
-        int previous = 0;
 
         for (int i = 1; i < pixels.size(); i++) {
             if (pixels[i] > mean && pixels[i - 1] <= mean) {
                 transitions.push_back(i);
-//                if (previous == 1) break;
-//                if (previous == 0) previous = 1;
-//                if (previous == -1) previous = 1;
 
             }
             else if (pixels[i] < mean && pixels[i - 1] >= mean) {
                 transitions.push_back(i);
-//                if (previous == -1) break;
-//                if (previous == 0) previous = -1;
-//                if (previous == 1) previous = -1;
-
             }
         }
 
-        cv::circle(display, corner, 3, cv::Scalar(255, 0, 0), -1, 8, 0);
-        std::ostringstream text;
-        text << transitions.size();
-        cv::putText(display, text.str(), corner, fontFace, 0.5, cv::Scalar(255, 0, 0));
-
         if (transitions.size() == 4) {
+            int sum_first = std::accumulate(pixels.begin(), pixels.begin() + transitions[0], 0);
+            sum_first += std::accumulate(pixels.begin() + transitions[3], pixels.end(), 0);
+            int sum_second = std::accumulate(pixels.begin() + transitions[0], pixels.begin() + transitions[1], 0);
+            int sum_third = std::accumulate(pixels.begin() + transitions[1], pixels.begin() + transitions[2], 0);
+            int sum_fourth = std::accumulate(pixels.begin() + transitions[2], pixels.begin() + transitions[3], 0);
+
+            int mean_first = sum_first / (transitions[0] + int(pixels.size()) - transitions[3]);
+            int mean_second = sum_second / (transitions[1] - transitions[0]);
+            int mean_third = sum_third / (transitions[2] - transitions[1]);
+            int mean_fourth = sum_fourth / (transitions[3] - transitions[2]);
+
+            if ((std::abs(mean_first - mean_third) > close_threshold) || (std::abs(mean_second - mean_fourth) > close_threshold)) {
+                return false;
+            }
+            if ((std::abs(mean_first - mean_second) < far_threshold) || (std::abs(mean_third - mean_fourth) < far_threshold)) {
+                return false;
+            }
+
             result.x = corner.x;
             result.y = corner.y;
+
+            cv::circle(display, corner, 3, cv::Scalar(255, 0, 0), -1, 8, 0);
+            std::ostringstream text;
+            text << transitions.size();
+            cv::putText(display, text.str(), corner, fontFace, 0.5, cv::Scalar(255, 0, 0));
             return true;
         }
     }
@@ -194,15 +203,10 @@ void target_detector::track_target(cv::Point target_location, const cv::Mat &ima
 
     mavros_msgs::CommandLong gimbal_command;
 
-    gimbal_command.request.broadcast = 0;
-    gimbal_command.request.confirmation = 0;
     gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
     gimbal_command.request.param1 = float(gimbal_state.pitch);
     gimbal_command.request.param2 = 0;
     gimbal_command.request.param3 = float(gimbal_state.yaw);
-    gimbal_command.request.param4 = 0;
-    gimbal_command.request.param5 = 0;
-    gimbal_command.request.param6 = 0;
     gimbal_command.request.param7 = MAV_MOUNT_MODE_MAVLINK_TARGETING;
 
     if (ros::Time::now() - last_command > ros::Duration(1)) {
@@ -257,7 +261,7 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
 
         if (target_found) {
             last_detection = ros::Time::now();
-            track_target(target_location, src_ptr->image);
+//            track_target(target_location, src_ptr->image);
         }
     }
 

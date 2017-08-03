@@ -11,6 +11,7 @@
         <remap from="landing_module_node/image" to="/cgo3_camera/image_raw"/>
         <remap from="landing_module_node/pose" to="/mavros/local_position/pose"/>
         <param name="h_fov" type="double" value="90"/>
+        <param name="search_altitude" type="double" value="35"/>
     </node> 
 
     <!--<node name="teraranger_altitude_broadcast" pkg="hallway_navigator" type="range_to_altitude_broadcaster" output="screen" />-->

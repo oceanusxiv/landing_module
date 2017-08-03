@@ -126,6 +126,8 @@ private:
     double h_fov;
     double search_altitude, search_position_x, search_position_y, search_yaw;
     bool target_found;
+    const int close_threshold = 25;
+    const int far_threshold = 100;
 
     void topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
                          const sensor_msgs::ImageConstPtr& imageMsg);
