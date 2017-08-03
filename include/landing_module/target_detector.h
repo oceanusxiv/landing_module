@@ -82,6 +82,7 @@ private:
     ros::NodeHandle nh_private_;
     ros::NodeHandle nh_;
     ros::Time last_command;
+    ros::Time last_detection;
     mavros_msgs::State current_state;
     geometry_msgs::PoseStamped current_pose;
     image_transport::ImageTransport it_;
@@ -122,6 +123,7 @@ private:
     const int fontFace = CV_FONT_NORMAL;
     double h_fov;
     double search_altitude, search_position_x, search_position_y, search_yaw;
+    bool target_found;
 
     void topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
                          const sensor_msgs::ImageConstPtr& imageMsg);
@@ -148,10 +150,9 @@ public:
         arming_client = nh_.serviceClient<mavros_msgs::CommandBool>("mavros/cmd/arming");
         set_mode_client = nh_.serviceClient<mavros_msgs::SetMode>("mavros/set_mode");
         nh_private_.param<double>("h_fov", h_fov, 90);
-        nh_private_.param<double>("search_altitude", search_altitude, 30);
+        nh_private_.param<double>("search_altitude", search_altitude, 35);
         nh_private_.param<double>("search_position_x", search_position_x, 0);
         nh_private_.param<double>("search_position_y", search_position_y, 0);
-        nh_private_.param<double>("search_yaw", search_yaw, 0);
 
         last_command = ros::Time::now();
     }
