@@ -5,6 +5,8 @@
 #ifndef LANDING_MODULE_TARGET_DETECTOR_H
 #define LANDING_MODULE_TARGET_DETECTOR_H
 
+#include <numeric>
+
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <geometry_msgs/PoseStamped.h>
