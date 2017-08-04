@@ -54,6 +54,9 @@ private:
             pitch_max = p_max;
             yaw_min = y_min;
             yaw_max = y_max;
+            roll = 0;
+            pitch = 0;
+            yaw = 0;
         }
 
         void add_roll(double input) {
@@ -69,8 +72,8 @@ private:
         }
 
         void add_yaw(double input) {
-            if (yaw_min > (yaw + input)) yaw = yaw_min;
-            else if ((yaw + input) > yaw_max) yaw = yaw_max;
+            if (yaw_min > (yaw + input)) yaw = (yaw + input) + 2 * yaw_min;
+            else if ((yaw + input) > yaw_max) yaw = (yaw + input) + 2 * yaw_max;
             else yaw += input;
         }
     };
@@ -131,7 +134,7 @@ private:
     const int fontFace = CV_FONT_NORMAL;
     double h_fov;
     double search_altitude, search_position_x, search_position_y, search_yaw;
-    bool target_found;
+    bool target_found, search_mode;
     const int close_threshold = 25;
     const int far_threshold = 100;
 
@@ -163,6 +166,7 @@ public:
         nh_private_.param<double>("search_altitude", search_altitude, 35);
         nh_private_.param<double>("search_position_x", search_position_x, 0);
         nh_private_.param<double>("search_position_y", search_position_y, 0);
+        search_mode = false;
 
         last_command = ros::Time::now();
     }

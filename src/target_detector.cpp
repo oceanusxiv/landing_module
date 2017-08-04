@@ -80,34 +80,34 @@ void target_detector::search_controller() {
     geometry_msgs::TwistStamped twist;
     static double yaw_dir = 45;
     static unsigned search_index = 0;
-    static bool arrival = false;
 
     twist.twist.linear.x = 0;
     twist.twist.linear.y = 0;
     twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
 
-    if (ros::Time::now() - last_detection > ros::Duration(10)) {
+    if (std::abs(current_pose.pose.position.z - search_altitude) < 0.5) search_mode = true;
+
+    if (ros::Time::now() - last_detection > ros::Duration(10) && search_mode) {
         double desired_position_x = search_position_x + search_pattern[search_index % search_pattern.size()].x;
         double desired_position_y = search_position_y + search_pattern[search_index % search_pattern.size()].y;
 
         twist.twist.linear.x = desired_position_x - current_pose.pose.position.x;
         twist.twist.linear.y = desired_position_y - current_pose.pose.position.y;
 
-        if (std::abs(current_pose.pose.position.x - desired_position_x) < 0.5 &&
-            std::abs(current_pose.pose.position.y - desired_position_y) < 0.5 && !arrival) {
-            arrival = true;
-            last_detection = ros::Time::now();
+        if (std::abs(current_pose.pose.position.x - desired_position_x) < 1.0 &&
+            std::abs(current_pose.pose.position.y - desired_position_y) < 1.0) {
             search_index++;
         }
     }
 
-//    if (target_found) {
-//        twist.twist.linear.x = gimbal_state.yaw
-//    }
+    if (ros::Time::now() - last_detection < ros::Duration(10) && search_mode) {
+        twist.twist.linear.x = std::cos(gimbal_state.yaw * (CV_PI/180.0)) * 6.0;
+        twist.twist.linear.y = -std::sin(gimbal_state.yaw * (CV_PI/180.0)) * 6.0;
+    }
 
     vel_pub_.publish(twist);
 
-    if (ros::Time::now() - last_detection > ros::Duration(3)) {
+    if (ros::Time::now() - last_detection > ros::Duration(3) && search_mode) {
 
         mavros_msgs::CommandLong gimbal_command;
 
@@ -116,8 +116,8 @@ void target_detector::search_controller() {
             if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
             else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
 
-            gimbal_state.add_yaw(yaw_dir);
-            gimbal_state.pitch = -60;
+//            gimbal_state.add_yaw(yaw_dir);
+            gimbal_state.pitch = -90;
 
             gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
             gimbal_command.request.param1 = float(gimbal_state.pitch);
@@ -179,16 +179,23 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
         }
 
         if (transitions.size() == 4) {
+            int num_first = (transitions[0] + int(pixels.size() - 1) - transitions[3]);
+            int num_second = (transitions[1] - transitions[0]);
+            int num_third = (transitions[2] - transitions[1]);
+            int num_fourth = (transitions[3] - transitions[2]);
+
+            if (num_first < 2 || num_second < 2 || num_third < 2 || num_fourth < 2) return false;
+
             int sum_first = std::accumulate(pixels.begin(), pixels.begin() + transitions[0], 0);
             sum_first += std::accumulate(pixels.begin() + transitions[3], pixels.end() - 1, 0);
             int sum_second = std::accumulate(pixels.begin() + transitions[0], pixels.begin() + transitions[1], 0);
             int sum_third = std::accumulate(pixels.begin() + transitions[1], pixels.begin() + transitions[2], 0);
             int sum_fourth = std::accumulate(pixels.begin() + transitions[2], pixels.begin() + transitions[3], 0);
 
-            int mean_first = sum_first / (transitions[0] + int(pixels.size() - 1) - transitions[3]);
-            int mean_second = sum_second / (transitions[1] - transitions[0]);
-            int mean_third = sum_third / (transitions[2] - transitions[1]);
-            int mean_fourth = sum_fourth / (transitions[3] - transitions[2]);
+            int mean_first = sum_first / num_first;
+            int mean_second = sum_second / num_second;
+            int mean_third = sum_third / num_third;
+            int mean_fourth = sum_fourth / num_fourth;
 
             if ((std::abs(mean_first - mean_third) > close_threshold) || (std::abs(mean_second - mean_fourth) > close_threshold)) {
                 return false;
@@ -215,8 +222,8 @@ void target_detector::track_target(cv::Point target_location, const cv::Mat &ima
 
     double aspect_ratio = double(image.cols)/image.rows;
     double v_fov = h_fov/aspect_ratio;
-    double yaw_correction = (target_location.x - (image.cols/2))*(h_fov/image.cols);
-    double pitch_correction = -(target_location.y - (image.rows/2))*(v_fov/image.rows);
+    double yaw_correction = (target_location.x - (image.cols/2))*(h_fov/image.cols)*0.5;
+    double pitch_correction = -(target_location.y - (image.rows/2))*(v_fov/image.rows)*0.5;
     gimbal_state.add_yaw(yaw_correction);
     gimbal_state.add_pitch(pitch_correction);
 
@@ -245,7 +252,7 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
     cv_bridge::CvImagePtr src_gray_ptr;
     cv_bridge::CvImagePtr src_ptr;
 
-    if (current_state.armed) {
+    if (current_state.armed && search_mode) {
         try {
             src_gray_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::MONO8);
             src_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::BGR8);
@@ -266,9 +273,9 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
 //            std::ofstream text;
 //
 //            time << ros::Time::now();
-//            image_file_name << "/home/eric1221bday/sandbox/" << time.str() << ".jpg";
-//            patch_file_name << "/home/eric1221bday/sandbox/" << time.str() << "_patch.jpg";
-//            text.open("/home/eric1221bday/sandbox/" + time.str());
+//            image_file_name << "/Users/eric1221bday/sandbox/" << time.str() << ".jpg";
+//            patch_file_name << "/Users/eric1221bday/sandbox/" << time.str() << "_patch.jpg";
+//            text.open("/Users/eric1221bday/sandbox/" + time.str());
 //
 //            src_gray_ptr->image.at<uchar>(target_location) = 255;
 //            cv::Mat success_patch = src_gray_ptr->image(cv::Rect(std::max(int(target_location.x - 9), 0), std::max(int(target_location.y - 9), 0), 20, 20));
