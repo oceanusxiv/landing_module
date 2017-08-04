@@ -6,6 +6,8 @@
 #define LANDING_MODULE_TARGET_DETECTOR_H
 
 #include <numeric>
+#include <iostream>
+#include <fstream>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
@@ -119,6 +121,10 @@ private:
                                    cv::Point2f(2, -2),
                                    cv::Point2f(2, -1),
                                    cv::Point2f(2, 0)};
+    std::vector<cv::Point2f> search_pattern{cv::Point2f(-50, -50),
+                                            cv::Point2f(-50, 50),
+                                            cv::Point2f(50, 50),
+                                            cv::Point2f(50, 50)};
     rpy gimbal_state;
     static const int MAV_CMD_DO_MOUNT_CONTROL = 205;
     static const int MAV_CMD_DO_MOUNT_CONFIGURE = 204;

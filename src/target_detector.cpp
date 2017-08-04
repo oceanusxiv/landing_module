@@ -79,22 +79,45 @@ void target_detector::search_controller() {
 
     geometry_msgs::TwistStamped twist;
     static double yaw_dir = 45;
+    static unsigned search_index = 0;
+    static bool arrival = false;
 
     twist.twist.linear.x = 0;
     twist.twist.linear.y = 0;
     twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
 
-    if (ros::Time::now() - last_detection > ros::Duration(5)) {
+    if (ros::Time::now() - last_detection > ros::Duration(10)) {
+        double desired_position_x = search_position_x + search_pattern[search_index % search_pattern.size()].x;
+        double desired_position_y = search_position_y + search_pattern[search_index % search_pattern.size()].y;
+
+        twist.twist.linear.x = desired_position_x - current_pose.pose.position.x;
+        twist.twist.linear.y = desired_position_y - current_pose.pose.position.y;
+
+        if (std::abs(current_pose.pose.position.x - desired_position_x) < 0.5 &&
+            std::abs(current_pose.pose.position.y - desired_position_y) < 0.5 && !arrival) {
+            arrival = true;
+            last_detection = ros::Time::now();
+            search_index++;
+        }
+    }
+
+//    if (target_found) {
+//        twist.twist.linear.x = gimbal_state.yaw
+//    }
+
+    vel_pub_.publish(twist);
+
+    if (ros::Time::now() - last_detection > ros::Duration(3)) {
 
         mavros_msgs::CommandLong gimbal_command;
 
-        if (ros::Time::now() - last_command > ros::Duration(1)) {
+        if (ros::Time::now() - last_command > ros::Duration(0.5)) {
 
             if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
             else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
 
             gimbal_state.add_yaw(yaw_dir);
-            gimbal_state.pitch = -40;
+            gimbal_state.pitch = -60;
 
             gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
             gimbal_command.request.param1 = float(gimbal_state.pitch);
@@ -108,8 +131,6 @@ void target_detector::search_controller() {
             last_command = ros::Time::now();
         }
     }
-
-    vel_pub_.publish(twist);
 
 //    geometry_msgs::PoseStamped pose;
 //
@@ -159,12 +180,12 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
 
         if (transitions.size() == 4) {
             int sum_first = std::accumulate(pixels.begin(), pixels.begin() + transitions[0], 0);
-            sum_first += std::accumulate(pixels.begin() + transitions[3], pixels.end(), 0);
+            sum_first += std::accumulate(pixels.begin() + transitions[3], pixels.end() - 1, 0);
             int sum_second = std::accumulate(pixels.begin() + transitions[0], pixels.begin() + transitions[1], 0);
             int sum_third = std::accumulate(pixels.begin() + transitions[1], pixels.begin() + transitions[2], 0);
             int sum_fourth = std::accumulate(pixels.begin() + transitions[2], pixels.begin() + transitions[3], 0);
 
-            int mean_first = sum_first / (transitions[0] + int(pixels.size()) - transitions[3]);
+            int mean_first = sum_first / (transitions[0] + int(pixels.size() - 1) - transitions[3]);
             int mean_second = sum_second / (transitions[1] - transitions[0]);
             int mean_third = sum_third / (transitions[2] - transitions[1]);
             int mean_fourth = sum_fourth / (transitions[3] - transitions[2]);
@@ -209,7 +230,7 @@ void target_detector::track_target(cv::Point target_location, const cv::Mat &ima
     gimbal_command.request.param3 = float(gimbal_state.yaw);
     gimbal_command.request.param7 = MAV_MOUNT_MODE_MAVLINK_TARGETING;
 
-    if (ros::Time::now() - last_command > ros::Duration(1)) {
+    if (ros::Time::now() - last_command > ros::Duration(0.5)) {
 
         if (gimbal_command_client.call(gimbal_command) && !int(gimbal_command.response.success)) {
             std::cout << "command failed!" << std::endl;
@@ -221,7 +242,7 @@ void target_detector::track_target(cv::Point target_location, const cv::Mat &ima
 
 void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
                                       const sensor_msgs::ImageConstPtr& imageMsg) {
-    cv_bridge::CvImageConstPtr src_gray_ptr;
+    cv_bridge::CvImagePtr src_gray_ptr;
     cv_bridge::CvImagePtr src_ptr;
 
     if (current_state.armed) {
@@ -239,21 +260,40 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
         target_found = detect_target(src_gray_ptr->image, src_ptr->image, target_location);
 
         if (target_found) {
-            cv::Mat success_patch = src_gray_ptr->image(cv::Rect(std::max(int(target_location.x - 2), 0), std::max(int(target_location.y - 2), 0), 4, 4));
+//            std::stringstream image_file_name;
+//            std::stringstream patch_file_name;
+//            std::stringstream time;
+//            std::ofstream text;
+//
+//            time << ros::Time::now();
+//            image_file_name << "/home/eric1221bday/sandbox/" << time.str() << ".jpg";
+//            patch_file_name << "/home/eric1221bday/sandbox/" << time.str() << "_patch.jpg";
+//            text.open("/home/eric1221bday/sandbox/" + time.str());
+//
+//            src_gray_ptr->image.at<uchar>(target_location) = 255;
+//            cv::Mat success_patch = src_gray_ptr->image(cv::Rect(std::max(int(target_location.x - 9), 0), std::max(int(target_location.y - 9), 0), 20, 20));
+//            cv::imwrite(image_file_name.str(), src_ptr->image);
+//            cv::imwrite(patch_file_name.str(), success_patch);
+//
+//            text << current_pose.pose.position.x << ", " << current_pose.pose.position.y << ", " << current_pose.pose.position.z << std::endl;
+//            text << gimbal_state.roll << ", " << gimbal_state.pitch << ", " << gimbal_state.yaw << std::endl;
+//            text << target_location.x << ", " << target_location.y << std::endl;
+//
+//            text.close();
 
-            cv::Mat dst_x, dst_y, dst, abs_dst_x, abs_dst_y, patch_enlarged;
-
-            cv::resize(success_patch, patch_enlarged, cv::Size(32, 32), 0, 0, cv::INTER_NEAREST);
-            cv::GaussianBlur(patch_enlarged, patch_enlarged, cv::Size(3, 3), 0, 0);
-            cv::Scharr(patch_enlarged, dst_x, CV_32F, 1, 0);
-            cv::Scharr(patch_enlarged, dst_y, CV_32F, 0, 1);
-            cv::convertScaleAbs(dst_x, abs_dst_x);
-            cv::convertScaleAbs(dst_y, abs_dst_y);
-            cv::addWeighted(abs_dst_x, 0.5, abs_dst_y, 0.5, 0, dst);
-    //    cv::Mat src_display = src_gray_ptr->image(cv::Rect(600, 350, 100, 100));
-            cv::imshow("Window", dst);
-            cv::imshow("Window2", patch_enlarged);
-            cv::waitKey(3);
+//            cv::Mat dst_x, dst_y, dst, abs_dst_x, abs_dst_y, patch_enlarged;
+//
+//            cv::resize(success_patch, patch_enlarged, cv::Size(32, 32), 0, 0, cv::INTER_NEAREST);
+//            cv::GaussianBlur(patch_enlarged, patch_enlarged, cv::Size(3, 3), 0, 0);
+//            cv::Scharr(patch_enlarged, dst_x, CV_32F, 1, 0);
+//            cv::Scharr(patch_enlarged, dst_y, CV_32F, 0, 1);
+//            cv::convertScaleAbs(dst_x, abs_dst_x);
+//            cv::convertScaleAbs(dst_y, abs_dst_y);
+//            cv::addWeighted(abs_dst_x, 0.5, abs_dst_y, 0.5, 0, dst);
+//    //    cv::Mat src_display = src_gray_ptr->image(cv::Rect(600, 350, 100, 100));
+//            cv::imshow("Window", dst);
+//            cv::imshow("Window2", patch_enlarged);
+//            cv::waitKey(3);
         }
 
         // Output modified video stream
@@ -261,7 +301,7 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
 
         if (target_found) {
             last_detection = ros::Time::now();
-//            track_target(target_location, src_ptr->image);
+            track_target(target_location, src_ptr->image);
         }
     }
 
