@@ -12,6 +12,7 @@ void target_detector::initialize_callbacks() {
     pos_sub_ = nh_.subscribe("mavros/local_position/pose", 10, &target_detector::pose_callback, this);
     pos_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("mavros/setpoint_position/local", 10);
     vel_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("mavros/setpoint_velocity/cmd_vel", 10);
+    raw_pub_ = nh_.advertise<mavros_msgs::PositionTarget>("mavros/setpoint_raw/local", 10);
 }
 
 void target_detector::state_callback(const mavros_msgs::StateConstPtr &stateMsg) {
@@ -53,7 +54,7 @@ void target_detector::initialize_uav() {
         if( current_state.mode != "OFFBOARD" &&
             (ros::Time::now() - last_command > ros::Duration(5.0))){
             if( set_mode_client.call(set_mode_msg) &&
-                set_mode_msg.response.mode_sent) {
+                set_mode_msg.response.success) {
                 ROS_INFO("Offboard enabled");
             }
             last_command = ros::Time::now();
@@ -77,8 +78,12 @@ void target_detector::initialize_uav() {
 
 void target_detector::search_controller() {
 
+    mavros_msgs::PositionTarget raw_pos;
+    raw_pos.coordinate_frame = raw_pos.FRAME_LOCAL_NED;
+    raw_pos.type_mask = raw_pos.IGNORE_AFX | raw_pos.IGNORE_AFY | raw_pos.IGNORE_AFZ | raw_pos.IGNORE_YAW_RATE;
+
     geometry_msgs::TwistStamped twist;
-    static double yaw_dir = 45;
+//    static double yaw_dir = 45;
     static unsigned search_index = 0;
 
     twist.twist.linear.x = 0;
@@ -100,9 +105,22 @@ void target_detector::search_controller() {
         }
     }
 
-    if (ros::Time::now() - last_detection < ros::Duration(10) && search_mode) {
-        twist.twist.linear.x = std::cos(gimbal_state.yaw * (CV_PI/180.0)) * 6.0;
-        twist.twist.linear.y = -std::sin(gimbal_state.yaw * (CV_PI/180.0)) * 6.0;
+    if (ros::Time::now() - last_detection < ros::Duration(5) && search_mode) {
+        if (gimbal_state.pitch < gimbal_state.pitch_min + 20) {
+            double error_x = (target_location.x - (image_size.x/2));
+            double error_y = (target_location.y - (image_size.y/2));
+            double error_corrected_x = error_x * std::cos(-gimbal_state.yaw * (CV_PI/180.0)) -
+                    error_y * std::sin(-gimbal_state.yaw * (CV_PI/180.0));
+            double error_corrected_y = error_x * std::sin(-gimbal_state.yaw * (CV_PI/180.0)) +
+                                       error_y * std::cos(-gimbal_state.yaw * (CV_PI/180.0));
+
+            twist.twist.linear.x = error_corrected_x * 0.05;
+            twist.twist.linear.y = error_corrected_y * 0.05;
+        }
+        else {
+            twist.twist.linear.x = std::cos(-gimbal_state.yaw * (CV_PI/180.0));
+            twist.twist.linear.y = std::sin(-gimbal_state.yaw * (CV_PI/180.0));
+        }
     }
 
     vel_pub_.publish(twist);
@@ -113,8 +131,8 @@ void target_detector::search_controller() {
 
         if (ros::Time::now() - last_command > ros::Duration(0.5)) {
 
-            if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
-            else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
+//            if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
+//            else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
 
 //            gimbal_state.add_yaw(yaw_dir);
             gimbal_state.pitch = -90;
@@ -143,7 +161,7 @@ void target_detector::search_controller() {
 
 }
 
-bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display, cv::Point2f& result) {
+bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display) {
 
     std::vector<cv::Point2f> corners;
     int maxCorners = 10;
@@ -204,8 +222,8 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
                 return false;
             }
 
-            result.x = corner.x;
-            result.y = corner.y;
+            target_location.x = corner.x;
+            target_location.y = corner.y;
 
             cv::circle(display, corner, 3, cv::Scalar(255, 0, 0), -1, 8, 0);
             std::ostringstream text;
@@ -262,9 +280,7 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
 
         }
 
-        cv::Point2f target_location;
-
-        target_found = detect_target(src_gray_ptr->image, src_ptr->image, target_location);
+        target_found = detect_target(src_gray_ptr->image, src_ptr->image);
 
         if (target_found) {
 //            std::stringstream image_file_name;

@@ -13,6 +13,7 @@
 #include <sensor_msgs/Image.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TwistStamped.h>
+#include <mavros_msgs/PositionTarget.h>
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
@@ -101,6 +102,7 @@ private:
     ros::Subscriber pos_sub_;
     ros::Publisher pos_pub_;
     ros::Publisher vel_pub_;
+    ros::Publisher raw_pub_;
     ros::ServiceClient gimbal_command_client;
     ros::ServiceClient arming_client;
     ros::ServiceClient set_mode_client;
@@ -127,16 +129,18 @@ private:
     std::vector<cv::Point2f> search_pattern{cv::Point2f(-50, -50),
                                             cv::Point2f(-50, 50),
                                             cv::Point2f(50, 50),
-                                            cv::Point2f(50, 50)};
+                                            cv::Point2f(50, -50)};
     rpy gimbal_state;
     static const int MAV_CMD_DO_MOUNT_CONTROL = 205;
     static const int MAV_CMD_DO_MOUNT_CONFIGURE = 204;
     const int fontFace = CV_FONT_NORMAL;
-    double h_fov;
-    double search_altitude, search_position_x, search_position_y, search_yaw;
+    double h_fov, aspect_ratio;
+    double search_altitude, search_position_x, search_position_y;
     bool target_found, search_mode;
     const int close_threshold = 25;
     const int far_threshold = 100;
+    cv::Point2i image_size  = cv::Point2i(1280, 720);
+    cv::Point2f target_location;
 
     void topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
                          const sensor_msgs::ImageConstPtr& imageMsg);
@@ -145,7 +149,7 @@ private:
 
     void pose_callback(const geometry_msgs::PoseStampedConstPtr& poseMsg);
 
-    bool detect_target(const cv::Mat &input, const cv::Mat& display, cv::Point2f& result);
+    bool detect_target(const cv::Mat &input, const cv::Mat& display);
 
     void track_target(cv::Point target_location, const cv::Mat &image);
 
