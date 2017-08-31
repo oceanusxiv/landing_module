@@ -3,13 +3,15 @@
 //
 
 #include <ros/ros.h>
-#include <geometry_msgs/PoseStamped.h>
-#include <mavros_msgs/CommandBool.h>
-#include <mavros_msgs/SetMode.h>
-#include <mavros_msgs/State.h>
 
-#include <landing_module/target_detector.h>
+#include <landing_module/search_controller.h>
 
+/**
+ * main loop, runs at 60Hz
+ * @param argc
+ * @param argv
+ * @return
+ */
 int main(int argc, char** argv) {
 
     ros::init(argc, argv, "landing_node");
@@ -17,13 +19,13 @@ int main(int argc, char** argv) {
 
     ros::Rate rate(60);
 
-    target_detector detector(nh);
-    detector.initialize_uav();
+    search_controller controller(nh);
+    controller.initialize_uav();
 
 //    std::cout << "init complete" << std::endl;
 
     do {
-        detector.search_controller();
+        controller.controller();
         ros::spinOnce();
         rate.sleep();
     } while(ros::ok());

@@ -4,163 +4,29 @@
 
 #include <landing_module/target_detector.h>
 
+/**
+ * initializes all ROS related callbacks and advertisements
+ */
 void target_detector::initialize_callbacks() {
-//    synchronizer_.registerCallback(boost::bind(&target_detector::topics_callback, this, _1, _2));
-    image_sub_ = it_.subscribe("image", 1, &target_detector::topics_callback, this);
+    image_sub_ = it_.subscribe("image", 1, &target_detector::images_callback, this);
     image_pub_ = it_.advertise("/out", 1);
-    state_sub_ = nh_.subscribe("mavros/state", 10, &target_detector::state_callback, this);
-    pos_sub_ = nh_.subscribe("mavros/local_position/pose", 10, &target_detector::pose_callback, this);
-    pos_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("mavros/setpoint_position/local", 10);
-    vel_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("mavros/setpoint_velocity/cmd_vel", 10);
-    raw_pub_ = nh_.advertise<mavros_msgs::PositionTarget>("mavros/setpoint_raw/local", 10);
 }
 
-void target_detector::state_callback(const mavros_msgs::StateConstPtr &stateMsg) {
-    current_state = *stateMsg;
-}
-
-void target_detector::pose_callback(const geometry_msgs::PoseStampedConstPtr &poseMsg) {
-    current_pose = *poseMsg;
-}
-
-void target_detector::initialize_uav() {
-    ros::Rate rate(20.0);
-
-    while(ros::ok() && !current_state.connected){
-        ros::spinOnce();
-        rate.sleep();
-    }
-
-    geometry_msgs::PoseStamped pose;
-    pose.pose.position.x = 0;
-    pose.pose.position.y = 0;
-    pose.pose.position.z = 0;
-
-    //send a few setpoints before starting
-    for(int i = 100; ros::ok() && i > 0; --i){
-        pos_pub_.publish(pose);
-        ros::spinOnce();
-        rate.sleep();
-    }
-
-    mavros_msgs::SetMode set_mode_msg;
-    set_mode_msg.request.custom_mode = "OFFBOARD";
-
-    mavros_msgs::CommandBool arm_cmd;
-    arm_cmd.request.value = true;
-
-    while(ros::ok() && !current_state.armed) {
-
-        if( current_state.mode != "OFFBOARD" &&
-            (ros::Time::now() - last_command > ros::Duration(5.0))){
-            if( set_mode_client.call(set_mode_msg) &&
-                set_mode_msg.response.success) {
-                ROS_INFO("Offboard enabled");
-            }
-            last_command = ros::Time::now();
-        }
-        else {
-            if( !current_state.armed &&
-                (ros::Time::now() - last_command > ros::Duration(5.0))){
-                if( arming_client.call(arm_cmd) &&
-                    arm_cmd.response.success) {
-                    ROS_INFO("Vehicle armed");
-                }
-                last_command = ros::Time::now();
-            }
-        }
-
-        pos_pub_.publish(pose);
-        ros::spinOnce();
-        rate.sleep();
-    }
-}
-
-void target_detector::search_controller() {
-
-    mavros_msgs::PositionTarget raw_pos;
-    raw_pos.coordinate_frame = raw_pos.FRAME_LOCAL_NED;
-    raw_pos.type_mask = raw_pos.IGNORE_AFX | raw_pos.IGNORE_AFY | raw_pos.IGNORE_AFZ | raw_pos.IGNORE_YAW_RATE;
-
-    geometry_msgs::TwistStamped twist;
-//    static double yaw_dir = 45;
-    static unsigned search_index = 0;
-
-    twist.twist.linear.x = 0;
-    twist.twist.linear.y = 0;
-    twist.twist.linear.z = search_altitude - current_pose.pose.position.z;
-
-    if (std::abs(current_pose.pose.position.z - search_altitude) < 0.5) search_mode = true;
-
-    if (ros::Time::now() - last_detection > ros::Duration(10) && search_mode) {
-        double desired_position_x = search_position_x + search_pattern[search_index % search_pattern.size()].x;
-        double desired_position_y = search_position_y + search_pattern[search_index % search_pattern.size()].y;
-
-        twist.twist.linear.x = desired_position_x - current_pose.pose.position.x;
-        twist.twist.linear.y = desired_position_y - current_pose.pose.position.y;
-
-        if (std::abs(current_pose.pose.position.x - desired_position_x) < 1.0 &&
-            std::abs(current_pose.pose.position.y - desired_position_y) < 1.0) {
-            search_index++;
-        }
-    }
-
-    if (ros::Time::now() - last_detection < ros::Duration(5) && search_mode) {
-        if (gimbal_state.pitch < gimbal_state.pitch_min + 20) {
-            double error_x = (target_location.x - (image_size.x/2));
-            double error_y = (target_location.y - (image_size.y/2));
-            double error_corrected_x = error_x * std::cos(-gimbal_state.yaw * (CV_PI/180.0)) -
-                    error_y * std::sin(-gimbal_state.yaw * (CV_PI/180.0));
-            double error_corrected_y = error_x * std::sin(-gimbal_state.yaw * (CV_PI/180.0)) +
-                                       error_y * std::cos(-gimbal_state.yaw * (CV_PI/180.0));
-
-            twist.twist.linear.x = error_corrected_x * 0.05;
-            twist.twist.linear.y = error_corrected_y * 0.05;
-        }
-        else {
-            twist.twist.linear.x = std::cos(-gimbal_state.yaw * (CV_PI/180.0));
-            twist.twist.linear.y = std::sin(-gimbal_state.yaw * (CV_PI/180.0));
-        }
-    }
-
-    vel_pub_.publish(twist);
-
-    if (ros::Time::now() - last_detection > ros::Duration(3) && search_mode) {
-
-        mavros_msgs::CommandLong gimbal_command;
-
-        if (ros::Time::now() - last_command > ros::Duration(0.5)) {
-
-//            if (gimbal_state.yaw == gimbal_state.yaw_max) yaw_dir = -45;
-//            else if (gimbal_state.yaw == gimbal_state.yaw_min) yaw_dir = 45;
-
-//            gimbal_state.add_yaw(yaw_dir);
-            gimbal_state.pitch = -90;
-
-            gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
-            gimbal_command.request.param1 = float(gimbal_state.pitch);
-            gimbal_command.request.param3 = float(gimbal_state.yaw);
-            gimbal_command.request.param7 = MAV_MOUNT_MODE_MAVLINK_TARGETING;
-
-            if (gimbal_command_client.call(gimbal_command) && !int(gimbal_command.response.success)) {
-                std::cout << "command failed!" << std::endl;
-            }
-
-            last_command = ros::Time::now();
-        }
-    }
-
-//    geometry_msgs::PoseStamped pose;
-//
-//    pose.pose.position.x = search_position_x;
-//    pose.pose.position.y = search_position_y;
-//    pose.pose.position.z = search_altitude;
-//    pose.pose.orientation = toQuaternion(0, 0, search_yaw);
-//
-//    pos_pub_.publish(pose);
-
-}
-
+/**
+ * main detection function for 2x2 checkerboard detection
+ * current algorithm: corners would be extracted from the input image, and each corner would be subject to the below
+ * filtering and identification.
+ * 1. Extract a 5x5 square ring centered on the corner detection
+ * 2. Eliminate if the ring does not contain 4 transitions, defined as a difference between two pixels larger than the
+ * mean pixel value of the ring.
+ * 3. Separate the ring into 4 blocks divided by the transition point
+ * 4. Eliminate if alternating blocks are not within a threshold value, and neighboring blocks are not above a threshold
+ * value
+ * 5. Output corner location as center of checkerboard if all tests are passed
+ * @param input camera image as a grayscale
+ * @param display image in color used for visualization of detection
+ * @return whether there has been a target detection or not
+ */
 bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display) {
 
     std::vector<cv::Point2f> corners;
@@ -175,10 +41,12 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
                             blockSize, useHarrisDetector, k);
 
     for (auto& corner : corners) {
+        // edge case rejection
         if (corner.x < 2 || corner.y < 2 || (corner.x > (input.cols - 2)) || (corner.y > (input.rows - 2))) return false;
 
         std::vector<int> transitions;
         std::vector<int> pixels;
+        // extracting ring of pixel centered on corner
         for (auto& loc : ring) {
             pixels.push_back(int(input.at<uchar>(corner + loc)));
         }
@@ -215,9 +83,11 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
             int mean_third = sum_third / num_third;
             int mean_fourth = sum_fourth / num_fourth;
 
+            // alternating blocks must be roughly the same color
             if ((std::abs(mean_first - mean_third) > close_threshold) || (std::abs(mean_second - mean_fourth) > close_threshold)) {
                 return false;
             }
+            // neighboring blocks must be roughly the opposite color
             if ((std::abs(mean_first - mean_second) < far_threshold) || (std::abs(mean_third - mean_fourth) < far_threshold)) {
                 return false;
             }
@@ -236,41 +106,15 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
     return false;
 }
 
-void target_detector::track_target(cv::Point target_location, const cv::Mat &image) {
-
-    double aspect_ratio = double(image.cols)/image.rows;
-    double v_fov = h_fov/aspect_ratio;
-    double yaw_correction = (target_location.x - (image.cols/2))*(h_fov/image.cols)*0.5;
-    double pitch_correction = -(target_location.y - (image.rows/2))*(v_fov/image.rows)*0.5;
-    gimbal_state.add_yaw(yaw_correction);
-    gimbal_state.add_pitch(pitch_correction);
-
-//    std::cout << gimbal_state.yaw << ", " << gimbal_state.pitch << std::endl;
-
-    mavros_msgs::CommandLong gimbal_command;
-
-    gimbal_command.request.command = MAV_CMD_DO_MOUNT_CONTROL;
-    gimbal_command.request.param1 = float(gimbal_state.pitch);
-    gimbal_command.request.param2 = 0;
-    gimbal_command.request.param3 = float(gimbal_state.yaw);
-    gimbal_command.request.param7 = MAV_MOUNT_MODE_MAVLINK_TARGETING;
-
-    if (ros::Time::now() - last_command > ros::Duration(0.5)) {
-
-        if (gimbal_command_client.call(gimbal_command) && !int(gimbal_command.response.success)) {
-            std::cout << "command failed!" << std::endl;
-        }
-
-        last_command = ros::Time::now();
-    }
-}
-
-void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr& poseMsg,*/
-                                      const sensor_msgs::ImageConstPtr& imageMsg) {
+/**
+ * callback for the camera image, the detecion is also done here and the visualization image is published
+ * @param imageMsg
+ */
+void target_detector::images_callback(const sensor_msgs::ImageConstPtr &imageMsg) {
     cv_bridge::CvImagePtr src_gray_ptr;
     cv_bridge::CvImagePtr src_ptr;
 
-    if (current_state.armed && search_mode) {
+    if (search_mode) {
         try {
             src_gray_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::MONO8);
             src_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::BGR8);
@@ -283,50 +127,31 @@ void target_detector::topics_callback(/*const geometry_msgs::PoseStampedConstPtr
         target_found = detect_target(src_gray_ptr->image, src_ptr->image);
 
         if (target_found) {
-//            std::stringstream image_file_name;
-//            std::stringstream patch_file_name;
-//            std::stringstream time;
-//            std::ofstream text;
-//
-//            time << ros::Time::now();
-//            image_file_name << "/Users/eric1221bday/sandbox/" << time.str() << ".jpg";
-//            patch_file_name << "/Users/eric1221bday/sandbox/" << time.str() << "_patch.jpg";
-//            text.open("/Users/eric1221bday/sandbox/" + time.str());
-//
-//            src_gray_ptr->image.at<uchar>(target_location) = 255;
-//            cv::Mat success_patch = src_gray_ptr->image(cv::Rect(std::max(int(target_location.x - 9), 0), std::max(int(target_location.y - 9), 0), 20, 20));
-//            cv::imwrite(image_file_name.str(), src_ptr->image);
-//            cv::imwrite(patch_file_name.str(), success_patch);
-//
-//            text << current_pose.pose.position.x << ", " << current_pose.pose.position.y << ", " << current_pose.pose.position.z << std::endl;
-//            text << gimbal_state.roll << ", " << gimbal_state.pitch << ", " << gimbal_state.yaw << std::endl;
-//            text << target_location.x << ", " << target_location.y << std::endl;
-//
-//            text.close();
-
-//            cv::Mat dst_x, dst_y, dst, abs_dst_x, abs_dst_y, patch_enlarged;
-//
-//            cv::resize(success_patch, patch_enlarged, cv::Size(32, 32), 0, 0, cv::INTER_NEAREST);
-//            cv::GaussianBlur(patch_enlarged, patch_enlarged, cv::Size(3, 3), 0, 0);
-//            cv::Scharr(patch_enlarged, dst_x, CV_32F, 1, 0);
-//            cv::Scharr(patch_enlarged, dst_y, CV_32F, 0, 1);
-//            cv::convertScaleAbs(dst_x, abs_dst_x);
-//            cv::convertScaleAbs(dst_y, abs_dst_y);
-//            cv::addWeighted(abs_dst_x, 0.5, abs_dst_y, 0.5, 0, dst);
-//    //    cv::Mat src_display = src_gray_ptr->image(cv::Rect(600, 350, 100, 100));
-//            cv::imshow("Window", dst);
-//            cv::imshow("Window2", patch_enlarged);
-//            cv::waitKey(3);
-        }
-
-        // Output modified video stream
-        image_pub_.publish(src_ptr->toImageMsg());
-
-        if (target_found) {
+            if (log) log_detection(src_ptr->image, src_gray_ptr->image);
             last_detection = ros::Time::now();
-            track_target(target_location, src_ptr->image);
         }
+
+        image_pub_.publish(src_ptr->toImageMsg());
     }
+}
 
+/**
+ * test function used for analysis by saving the image patch centered on detected targets as well as the whole image
+ * @param image
+ * @param gray_image
+ */
+void target_detector::log_detection(cv::Mat &image, cv::Mat &gray_image) {
+    std::stringstream image_file_name;
+    std::stringstream patch_file_name;
+    std::stringstream time;
 
+    time << ros::Time::now();
+    image_file_name << "/Users/eric1221bday/sandbox/" << time.str() << ".jpg";
+    patch_file_name << "/Users/eric1221bday/sandbox/" << time.str() << "_patch.jpg";
+
+    gray_image.at<uchar>(target_location) = 255;
+    cv::Mat success_patch = gray_image(cv::Rect(std::max(int(target_location.x - 9), 0),
+                                                std::max(int(target_location.y - 9), 0), 20, 20));
+    cv::imwrite(image_file_name.str(), image);
+    cv::imwrite(patch_file_name.str(), success_patch);
 }

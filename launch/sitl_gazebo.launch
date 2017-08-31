@@ -13,11 +13,5 @@
         <remap from="landing_module_node/pose" to="/mavros/local_position/pose"/>
         <param name="h_fov" type="double" value="90"/>
         <param name="search_altitude" type="double" value="50"/>
-    </node> 
-
-    <!--<node name="teraranger_altitude_broadcast" pkg="hallway_navigator" type="range_to_altitude_broadcaster" output="screen" />-->
-
-    <!--<node name="teraranger_transform" pkg="topic_tools" type="transform" args="/teraranger_sim /terarangerone sensor_msgs/Range 'm.header, 1, m.angle_max-m.angle_min, m.range_min, m.range_max, m.ranges[0]'" />-->
-
-    <!--<node name="base_to_teraranger" pkg="tf2_ros" type="static_transform_publisher" args="0.05 0.05 -0.1 0 0 0 base_link base_range" />-->
+    </node>
 </launch>
