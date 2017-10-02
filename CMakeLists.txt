@@ -154,6 +154,11 @@ add_executable(${PROJECT_NAME}_node
         src/gimbal_controller.cpp
         include/landing_module/gimbal_controller.h)
 
+add_executable(${PROJECT_NAME}_play_video
+        src/play_video.cpp
+        src/target_detector.cpp
+        include/landing_module/target_detector.h)
+
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -172,6 +177,9 @@ add_executable(${PROJECT_NAME}_node
 target_link_libraries(${PROJECT_NAME}_node
    ${catkin_LIBRARIES}
  )
+
+target_link_libraries(${PROJECT_NAME}_play_video
+        ${catkin_LIBRARIES})
 
 #############
 ## Install ##

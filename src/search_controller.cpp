@@ -65,7 +65,7 @@ void search_controller::initialize_uav() {
         if( current_state.mode != "OFFBOARD" &&
             (ros::Time::now() - last_command > ros::Duration(5.0))){
             if( set_mode_client.call(set_mode_msg) &&
-                set_mode_msg.response.success) {
+                set_mode_msg.response.mode_sent) {
                 ROS_INFO("Offboard enabled");
             }
             last_command = ros::Time::now();

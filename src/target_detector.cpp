@@ -8,7 +8,7 @@
  * initializes all ROS related callbacks and advertisements
  */
 void target_detector::initialize_callbacks() {
-    image_sub_ = it_.subscribe("image", 1, &target_detector::images_callback, this);
+    image_sub_ = it_.subscribe("/play_video/camera/image", 1, &target_detector::images_callback, this);
     image_pub_ = it_.advertise("/out", 1);
 }
 
@@ -30,7 +30,7 @@ void target_detector::initialize_callbacks() {
 bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display) {
 
     std::vector<cv::Point2f> corners;
-    int maxCorners = 10;
+    int maxCorners = 50;
     double qualityLevel = 0.01;
     double minDistance = 5;
     int blockSize = 3;
@@ -43,7 +43,7 @@ bool target_detector::detect_target(const cv::Mat &input, const cv::Mat& display
     for (auto& corner : corners) {
         // edge case rejection
         if (corner.x < 2 || corner.y < 2 || (corner.x > (input.cols - 2)) || (corner.y > (input.rows - 2))) return false;
-
+        cv::circle(display, corner, 3, cv::Scalar(255, 0, 0), -1, 8, 0);
         std::vector<int> transitions;
         std::vector<int> pixels;
         // extracting ring of pixel centered on corner
@@ -124,6 +124,8 @@ void target_detector::images_callback(const sensor_msgs::ImageConstPtr &imageMsg
 
         }
 
+        create_ring(2);
+        std::cout << ring.size() << std::endl;
         target_found = detect_target(src_gray_ptr->image, src_ptr->image);
 
         if (target_found) {
@@ -154,4 +156,21 @@ void target_detector::log_detection(cv::Mat &image, cv::Mat &gray_image) {
                                                 std::max(int(target_location.y - 9), 0), 20, 20));
     cv::imwrite(image_file_name.str(), image);
     cv::imwrite(patch_file_name.str(), success_patch);
+}
+
+void target_detector::create_ring(int radius) {
+    ring.clear();
+
+    for (int i = radius; i > -radius; i--) {
+        ring.emplace_back(i, radius);
+    }
+    for (int i = radius; i > -radius; i--) {
+        ring.emplace_back(-radius, i);
+    }
+    for (int i = -radius; i < radius; i++) {
+        ring.emplace_back(i, -radius);
+    }
+    for (int i = -radius; i < radius; i++) {
+        ring.emplace_back(radius, i);
+    }
 }

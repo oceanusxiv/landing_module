@@ -29,23 +29,7 @@ private:
     image_transport::ImageTransport it_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
-    std::vector<cv::Point2f> ring {cv::Point2f(2, 0),
-                                   cv::Point2f(2, 1),
-                                   cv::Point2f(2, 2),
-                                   cv::Point2f(1, 2),
-                                   cv::Point2f(0, 2),
-                                   cv::Point2f(-1, 2),
-                                   cv::Point2f(-2, 2),
-                                   cv::Point2f(-2, 1),
-                                   cv::Point2f(-2, 0),
-                                   cv::Point2f(-2, -1),
-                                   cv::Point2f(-2, -2),
-                                   cv::Point2f(-1, -2),
-                                   cv::Point2f(0, -2),
-                                   cv::Point2f(1, -2),
-                                   cv::Point2f(2, -2),
-                                   cv::Point2f(2, -1),
-                                   cv::Point2f(2, 0)};
+    std::vector<cv::Point2f> ring {};
     const int fontFace = CV_FONT_NORMAL;
     double h_fov, aspect_ratio;
     bool target_found, search_mode, log;
@@ -59,6 +43,8 @@ private:
     bool detect_target(const cv::Mat &input, const cv::Mat& display);
 
     void log_detection(cv::Mat& image, cv::Mat& gray_image);
+
+    void create_ring(int radius);
 
 public:
     target_detector(const ros::NodeHandle& nh_private) :
